@@ -42,7 +42,7 @@ def _element_signals(node) -> dict | None:
 	try:
 		element_hash = hash(node)
 	except Exception:
-		element_hash = id(node)
+		element_hash = None
 	return {
 		'tag_name': (getattr(node, 'node_name', '') or '').lower(),
 		'attributes': dict(getattr(node, 'attributes', None) or {}),
@@ -86,7 +86,7 @@ class StepRecorder:
 				try:
 					hashes.append(hash(node))
 				except Exception:
-					hashes.append(id(node))
+					hashes.append(None)
 			with open(self.path, 'a', encoding='utf-8') as fh:
 				for i, action in enumerate(actions or []):
 					try:

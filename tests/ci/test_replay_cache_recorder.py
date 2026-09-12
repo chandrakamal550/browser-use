@@ -4,19 +4,40 @@ from types import SimpleNamespace
 from browser_use.replay_cache.recorder import StepRecorder
 
 
+class _Node:
+	"""A stand-in for EnhancedDOMTreeNode carrying only what the recorder reads.
+
+	Unlike types.SimpleNamespace, this is genuinely hashable: SimpleNamespace
+	defines __eq__, which auto-sets __hash__ = None, so hash() on it always
+	raises TypeError regardless of what the recorder does. A plain class with
+	no __eq__ keeps the default identity-based __hash__, exercising the real
+	hashing path the way a real EnhancedDOMTreeNode (which defines an explicit
+	content-derived __hash__) would.
+	"""
+
+	def __init__(self, **kw):
+		defaults = dict(
+			node_name="A",
+			attributes={"href": "/stocks/nvda/"},
+			xpath="/html/body/div/a",
+			ax_node=SimpleNamespace(role="link", name="NVDA NVIDIA Corporation Stock"),
+			snapshot_node=None,
+		)
+		defaults.update(kw)
+		self.__dict__.update(defaults)
+
+	def get_meaningful_text_for_llm(self):
+		return "NVDA NVIDIA Corporation Stock"
+
+
+class _UnhashableNode(_Node):
+	"""A node whose hash() raises, the way an unhashable production node would."""
+
+	__hash__ = None
+
+
 def _node(**kw):
-	"""A stand-in for EnhancedDOMTreeNode carrying only what the recorder reads."""
-	defaults = dict(
-		node_name="A",
-		attributes={"href": "/stocks/nvda/"},
-		xpath="/html/body/div/a",
-		ax_node=SimpleNamespace(role="link", name="NVDA NVIDIA Corporation Stock"),
-		snapshot_node=None,
-	)
-	defaults.update(kw)
-	node = SimpleNamespace(**defaults)
-	node.get_meaningful_text_for_llm = lambda: "NVDA NVIDIA Corporation Stock"
-	return node
+	return _Node(**kw)
 
 
 def _action(name, **params):
@@ -78,6 +99,39 @@ def test_records_selector_map_hashes_before_the_action(tmp_path):
 	)
 	row = json.loads(trace.read_text().strip())
 	assert len(row["selector_map_hashes"]) == 2
+
+
+def test_element_hash_pins_to_the_node_hash(tmp_path):
+	"""The pruner compares a later step's element_hash against an earlier
+	step's selector_map_hashes, across different node objects for the same
+	logical element (the DOM tree is rebuilt every step). That comparison
+	only works if element_hash is the node's real, content-derived hash."""
+	trace = tmp_path / "trace.jsonl"
+	node = _node()
+	StepRecorder(trace).record(
+		step=1,
+		url="https://example.com/",
+		actions=[_action("click", index=1)],
+		results=[SimpleNamespace(error=None)],
+		selector_map={1: node},
+		duration_s=None,
+	)
+	row = json.loads(trace.read_text().strip())
+	assert row["element"]["element_hash"] == hash(node)
+
+
+def test_element_hash_is_none_when_the_node_is_unhashable(tmp_path):
+	trace = tmp_path / "trace.jsonl"
+	StepRecorder(trace).record(
+		step=1,
+		url="https://example.com/",
+		actions=[_action("click", index=1)],
+		results=[SimpleNamespace(error=None)],
+		selector_map={1: _UnhashableNode()},
+		duration_s=None,
+	)
+	row = json.loads(trace.read_text().strip())
+	assert row["element"]["element_hash"] is None
 
 
 def test_records_failure(tmp_path):
