@@ -60,6 +60,7 @@ from browser_use.config import CONFIG
 from browser_use.dom.views import DOMInteractedElement
 from browser_use.filesystem.file_system import FileSystem
 from browser_use.observability import observe, observe_debug
+from browser_use.replay_cache.recorder import StepRecorder
 from browser_use.telemetry.service import ProductTelemetry
 from browser_use.telemetry.views import AgentTelemetryEvent
 from browser_use.tools.registry.views import ActionModel
@@ -1059,6 +1060,17 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 			interacted_elements = AgentHistory.get_interacted_element(model_output, browser_state_summary.dom_state.selector_map)
 		else:
 			interacted_elements = [None]
+
+		recorder = StepRecorder.from_env()
+		if recorder is not None and model_output:
+			recorder.record(
+				step=self.state.n_steps,
+				url=browser_state_summary.url,
+				actions=model_output.action,
+				results=result,
+				selector_map=browser_state_summary.dom_state.selector_map,
+				duration_s=metadata.duration_seconds if metadata else None,
+			)
 
 		# Store screenshot and get path
 		screenshot_path = None
